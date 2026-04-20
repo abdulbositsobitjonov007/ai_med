@@ -460,7 +460,7 @@ function App() {
                     <p className="text-sm font-semibold uppercase tracking-[0.26em] text-teal-600">
                       AI Med
                     </p>
-                    <p className="text-sm text-slate-500">{copy.appSubtitle}</p>
+                    <p className="text-sm text-slate-500 line-clamp-1">{copy.appSubtitle}</p>
                   </div>
                 </div>
               </div>
