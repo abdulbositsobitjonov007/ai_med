@@ -4,6 +4,12 @@ import { FiClock, FiMenu, FiPlus, FiSend, FiX } from 'react-icons/fi';
 const HISTORY_STORAGE_KEY = 'med_history';
 const LANGUAGE_STORAGE_KEY = 'med_language';
 const SUPPORTED_LANGUAGES = ['en', 'ru', 'uz'];
+const DEFAULT_DEV_API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? DEFAULT_DEV_API_BASE_URL : '')
+).replace(/\/$/, '');
+const ANALYZE_ENDPOINT = API_BASE_URL ? `${API_BASE_URL}/analyze` : '/analyze';
 
 const translations = {
   en: {
@@ -285,16 +291,25 @@ function App() {
     setResult(null);
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/analyze', {
+      const response = await fetch(ANALYZE_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symptoms: trimmedSymptoms, language }),
       });
 
-      const data = await response.json();
+      const responseContentType = response.headers.get('content-type') || '';
+      const data = responseContentType.includes('application/json')
+        ? await response.json()
+        : null;
 
       if (!response.ok) {
-        throw new Error(data?.detail || copy.analyzeFailed);
+        throw new Error(
+          data?.detail ||
+            data?.message ||
+            (response.status === 404 && !API_BASE_URL
+              ? 'API endpoint is not configured for production deployment.'
+              : `${copy.analyzeFailed} (HTTP ${response.status})`)
+        );
       }
 
       const normalizedResult = {
