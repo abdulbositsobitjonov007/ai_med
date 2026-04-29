@@ -7,6 +7,7 @@ import {
     Col,
     ConfigProvider,
     Divider,
+    Drawer,
     Empty,
     Form,
     Input,
@@ -55,6 +56,7 @@ const copy = {
         language: 'Til',
         pickerLabel: 'Yo‘nalishlar',
         historyTitle: "So'nggi so'rovlar",
+        historyButton: 'Tarix',
         historyEmpty: "Hali saqlangan so'rovlar yo'q.",
         clearHistory: 'Tarixni tozalash',
         restore: 'Ochish',
@@ -151,6 +153,7 @@ const copy = {
         language: 'Language',
         pickerLabel: 'Conditions',
         historyTitle: 'Request history',
+        historyButton: 'History',
         historyEmpty: 'No saved requests yet.',
         clearHistory: 'Clear history',
         restore: 'Open',
@@ -1018,6 +1021,26 @@ const getSavedHistory = () => {
     }
 };
 
+const getSliderMarks = (question, language) => {
+    const marks = question.marks?.[language] || {};
+    const midPoint = Math.round((question.min + question.max) / 2);
+
+    return {
+        [midPoint]: (
+            <span
+                style={{
+                    display: 'inline-block',
+                    textAlign: 'center',
+                    lineHeight: 1.2,
+                    fontSize: 13,
+                }}
+            >
+                {marks[midPoint] ?? midPoint}
+            </span>
+        ),
+    };
+};
+
 const formatAnswer = (question, values, language) => {
     const rawValue = values[question.name];
 
@@ -1232,13 +1255,31 @@ const QuestionField = ({ question, form, language }) => {
     }
 
     if (question.type === 'slider') {
+        const marks = question.marks[language];
+
         return (
             <Form.Item
                 label={question.label[language]}
                 name={question.name}
                 rules={question.required ? [{ required: true, message: langCopy.moodRequired }] : []}
             >
-                <Slider min={question.min} max={question.max} marks={question.marks[language]} />
+                <div style={{ paddingInline: 8, paddingBottom: 12 }}>
+                    <Slider min={question.min} max={question.max} marks={getSliderMarks(question, language)} />
+                    <div
+                        style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: 12,
+                            marginTop: 10,
+                            color: '#475569',
+                            fontSize: 13,
+                            lineHeight: 1.25,
+                        }}
+                    >
+                        <span style={{ maxWidth: 84, textAlign: 'left' }}>{marks[question.min]}</span>
+                        <span style={{ maxWidth: 84, textAlign: 'right' }}>{marks[question.max]}</span>
+                    </div>
+                </div>
             </Form.Item>
         );
     }
@@ -1280,6 +1321,7 @@ function FormsSympthoms() {
     const [result, setResult] = useState(null);
     const [loading, setLoading] = useState(false);
     const [history, setHistory] = useState(getSavedHistory);
+    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [form] = Form.useForm();
     const { message } = App.useApp();
 
@@ -1364,9 +1406,63 @@ function FormsSympthoms() {
         setSelectedConditionKey(item.conditionKey);
         setResult(item.result || null);
         form.setFieldsValue(item.values || {});
+        setIsHistoryOpen(false);
     };
 
     const labels = scoreLabels(langCopy);
+    const historyLabel = langCopy.historyButton || langCopy.historyTitle;
+    const historyContent = (
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            {history.length > 0 ? (
+                history.map((item) => {
+                    const conditionTitle =
+                        conditions.find((condition) => condition.key === item.conditionKey)?.title[language] ||
+                        item.conditionKey;
+                    const patientName = item.values?.fullName || '-';
+                    const tone = statusTone[item.result?.color] || statusTone.GRAY;
+
+                    return (
+                        <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => handleRestoreHistory(item)}
+                            style={{
+                                width: '100%',
+                                textAlign: 'left',
+                                padding: 14,
+                                borderRadius: 18,
+                                border: '1px solid rgba(148,163,184,0.18)',
+                                background: '#ffffff',
+                                color: '#0f172a',
+                                cursor: 'pointer',
+                            }}
+                        >
+                            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                                <Space wrap>
+                                    <Text style={{ color: '#0f172a', fontWeight: 700 }}>{conditionTitle}</Text>
+                                    <Tag color={tone.color}>{labels[item.result?.color] || labels.GRAY}</Tag>
+                                </Space>
+                                <Text style={{ color: '#475569' }}>{patientName}</Text>
+                                <Text style={{ color: '#64748b', fontSize: 12 }}>
+                                    {new Date(item.createdAt).toLocaleString(item.language || language)}
+                                </Text>
+                            </Space>
+                        </button>
+                    );
+                })
+            ) : (
+                <div
+                    style={{
+                        borderRadius: 18,
+                        background: '#f8fafc',
+                        padding: 16,
+                    }}
+                >
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={langCopy.historyEmpty} />
+                </div>
+            )}
+        </Space>
+    );
 
     return (
         <ConfigProvider
@@ -1451,7 +1547,7 @@ function FormsSympthoms() {
                                                 style={{
                                                     borderRadius: 22,
                                                     background: 'rgba(255,255,255,0.08)',
-                                                    borderColor: 'rgba(255,255,255,0.12)',
+                                                    borderColor: '#e2e2e2',
                                                 }}
                                                 styles={{ body: { padding: 16 } }}
                                             >
@@ -1520,96 +1616,48 @@ function FormsSympthoms() {
                                                 description={langCopy.importantBody}
                                             />
 
-                                            <Card
-                                                size="small"
+                                            <Button
+                                                size="large"
+                                                icon={<HistoryOutlined />}
+                                                onClick={() => setIsHistoryOpen(true)}
                                                 style={{
-                                                    borderRadius: 24,
+                                                    height: 50,
+                                                    borderRadius: 18,
+                                                    borderColor: 'rgba(255,255,255,0.14)',
                                                     background: 'rgba(255,255,255,0.08)',
-                                                    borderColor: 'rgba(255,255,255,0.12)',
+                                                    color: '#fff',
+                                                    justifyContent: 'flex-start',
                                                 }}
-                                                styles={{ body: { padding: 16 } }}
+                                                block
                                             >
-                                                <Space
-                                                    align="center"
-                                                    style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }}
-                                                >
-                                                    <Text style={{ color: '#fff', fontWeight: 700 }}>
-                                                        <Space>
-                                                            <HistoryOutlined />
-                                                            {langCopy.historyTitle}
-                                                        </Space>
-                                                    </Text>
-                                                    {history.length > 0 ? (
-                                                        <Button size="small" onClick={() => setHistory([])}>
-                                                            {langCopy.clearHistory}
-                                                        </Button>
-                                                    ) : null}
-                                                </Space>
-
-                                                <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                                                    {history.length > 0 ? (
-                                                        history.map((item) => {
-                                                            const conditionTitle =
-                                                                conditions.find((condition) => condition.key === item.conditionKey)?.title[language] ||
-                                                                item.conditionKey;
-                                                            const patientName = item.values?.fullName || '-';
-                                                            const tone = statusTone[item.result?.color] || statusTone.GRAY;
-
-                                                            return (
-                                                                <button
-                                                                    key={item.id}
-                                                                    type="button"
-                                                                    onClick={() => handleRestoreHistory(item)}
-                                                                    style={{
-                                                                        width: '100%',
-                                                                        textAlign: 'left',
-                                                                        padding: 14,
-                                                                        borderRadius: 18,
-                                                                        border: '1px solid rgba(255,255,255,0.10)',
-                                                                        background: 'rgba(255,255,255,0.05)',
-                                                                        color: '#fff',
-                                                                        cursor: 'pointer',
-                                                                    }}
-                                                                >
-                                                                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                                                                        <Space wrap>
-                                                                            <Text style={{ color: '#fff', fontWeight: 700 }}>{conditionTitle}</Text>
-                                                                            <Tag color={tone.color}>{labels[item.result?.color] || labels.GRAY}</Tag>
-                                                                        </Space>
-                                                                        <Text style={{ color: 'rgba(255,255,255,0.78)' }}>{patientName}</Text>
-                                                                        <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12 }}>
-                                                                            {new Date(item.createdAt).toLocaleString(item.language || language)}
-                                                                        </Text>
-                                                                    </Space>
-                                                                </button>
-                                                            );
-                                                        })
-                                                    ) : (
-                                                        <div
-                                                            style={{
-                                                                borderRadius: 18,
-                                                                background: 'rgba(255,255,255,0.04)',
-                                                                padding: 16,
-                                                            }}
-                                                        >
-                                                            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={langCopy.historyEmpty} />
-                                                        </div>
-                                                    )}
-                                                </Space>
-                                            </Card>
+                                                {historyLabel}
+                                            </Button>
                                         </Space>
                                     </div>
                                 </Col>
 
                                 <Col xs={24} xl={16}>
                                     <div style={{ padding: 24 }}>
-                                        <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 24 }}>
-                                            <Tag
-                                                color="blue"
-                                                style={{ width: 'fit-content', borderRadius: 999, paddingInline: 14, paddingBlock: 6 }}
+                                        <Space
+                                            direction="vertical"
+                                            size={8}
+                                            style={{ width: '100%', marginBottom: 24 }}
+                                        >
+                                            <Space
+                                                wrap
+                                                align="center"
+                                                style={{ width: '100%', justifyContent: 'space-between' }}
                                             >
-                                                {langCopy.selectedTag}
-                                            </Tag>
+                                                <Tag
+                                                    color="blue"
+                                                    style={{ width: 'fit-content', borderRadius: 999, paddingInline: 14, paddingBlock: 6 }}
+                                                >
+                                                    {langCopy.selectedTag}
+                                                </Tag>
+                                                <Button icon={<HistoryOutlined />} onClick={() => setIsHistoryOpen(true)}>
+                                                    {historyLabel}
+                                                </Button>
+                                            </Space>
                                             <Title level={3} style={{ margin: 0 }}>
                                                 {selectedCondition.title[language]}
                                             </Title>
@@ -1631,13 +1679,13 @@ function FormsSympthoms() {
                                                         xs={24}
                                                         md={question.type === 'textarea' || question.type === 'slider' ? 24 : 12}
                                                     >
-                                                        <Card
+                                                        <Card className='bg-[#ededed]'
                                                             size="small"
                                                             style={{
                                                                 marginBottom: 18,
                                                                 borderRadius: 22,
                                                                 borderColor: '#e2e8f0',
-                                                                background: '#fcfdff',
+                                                                background: '#ededed',
                                                             }}
                                                             styles={{ body: { padding: 18 } }}
                                                         >
@@ -1660,7 +1708,7 @@ function FormsSympthoms() {
                                         <Divider />
 
                                         {loading ? (
-                                            <Card
+                                            <Card className=''
                                                 style={{
                                                     borderRadius: 28,
                                                     borderColor: '#d9e3f0',
@@ -1682,6 +1730,23 @@ function FormsSympthoms() {
                                 </Col>
                             </Row>
                         </Card>
+
+                        <Drawer
+                            title={langCopy.historyTitle}
+                            placement="right"
+                            width="min(92vw, 380px)"
+                            open={isHistoryOpen}
+                            onClose={() => setIsHistoryOpen(false)}
+                            extra={
+                                history.length > 0 ? (
+                                    <Button size="small" onClick={() => setHistory([])}>
+                                        {langCopy.clearHistory}
+                                    </Button>
+                                ) : null
+                            }
+                        >
+                            {historyContent}
+                        </Drawer>
                     </div>
                 </div>
             </App>
