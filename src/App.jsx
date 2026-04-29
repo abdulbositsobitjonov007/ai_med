@@ -1,7 +1,7 @@
-import Forms from "../components/forms";
+import FormsSympthoms from "../components/FormsSympthoms";
 
 function App() {
-  return <Forms />;
+  return <FormsSympthoms/>;
 }
 
 export default App;
