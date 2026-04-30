@@ -25,28 +25,40 @@ import { CheckCircleOutlined, HeartOutlined, HistoryOutlined, MedicineBoxOutline
 
 const { Title, Paragraph, Text } = Typography;
 
+// Local storage keys keep the selected language and recent submissions available
+// even after the page is refreshed.
 const HISTORY_STORAGE_KEY = 'pediatric_form_history';
 const LANGUAGE_STORAGE_KEY = 'pediatric_form_language';
+
+// Sentinel value used when a radio question exposes an additional "Other" field.
 const OTHER_VALUE = '__other__';
+
+// Backend configuration for the optional AI analysis API.
 const DEFAULT_DEV_API_BASE_URL = 'http://127.0.0.1:8000';
 const API_BASE_URL = (
     import.meta.env.VITE_API_BASE_URL ||
     (import.meta.env.DEV ? DEFAULT_DEV_API_BASE_URL : '')
 ).replace(/\/$/, '');
 const ANALYZE_ENDPOINT = API_BASE_URL ? `${API_BASE_URL}/analyze` : '/analyze';
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const SUPABASE_TABLE = import.meta.env.VITE_SUPABASE_TABLE || 'submissions';
 
+// Supported UI languages shown in the language segmented control.
 const LANGUAGES = [
     { value: 'uz', label: "O'zbek" },
     { value: 'ru', label: 'Русский' },
     { value: 'en', label: 'English' },
 ];
 
+// Reusable translated yes/no/other labels shared across many questions.
 const YES_NO = {
     yes: { uz: 'Ha', ru: 'Да', en: 'Yes' },
     no: { uz: "Yo'q", ru: 'Нет', en: 'No' },
     other: { uz: 'Boshqa', ru: 'Другое', en: 'Other' },
 };
 
+// Centralized translation copy for labels, helper text, validation, and AI prompts.
 const copy = {
     uz: {
         appTag: 'Bolalar monitoringi',
@@ -196,8 +208,11 @@ const copy = {
     },
 };
 
+// Small helper to keep large option lists concise and consistent.
 const makeOption = (value, label) => ({ value, label });
 
+// This schema drives the entire form UI.
+// Each condition contains translated metadata and a list of question definitions.
 const conditions = [
     {
         key: 'diabetes',
@@ -844,6 +859,7 @@ const conditions = [
     },
 ];
 
+// Local recommendation text used by the offline fallback evaluator.
 const fallbackText = {
     uz: {
         diabetes: {
@@ -988,6 +1004,7 @@ const fallbackText = {
     },
 };
 
+// Converts backend-style color codes into readable status labels.
 const scoreLabels = (langCopy) => ({
     GREEN: langCopy.stable,
     YELLOW: langCopy.watch,
@@ -995,6 +1012,7 @@ const scoreLabels = (langCopy) => ({
     GRAY: langCopy.review,
 });
 
+// Visual tone map used by tags and alert cards.
 const statusTone = {
     GREEN: { color: 'green', banner: 'success' },
     YELLOW: { color: 'gold', banner: 'warning' },
@@ -1002,6 +1020,7 @@ const statusTone = {
     GRAY: { color: 'default', banner: 'info' },
 };
 
+// Restores the user's last selected language from local storage.
 const getInitialLanguage = () => {
     try {
         const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY);
@@ -1011,6 +1030,7 @@ const getInitialLanguage = () => {
     }
 };
 
+// Restores recent form submissions for the history drawer.
 const getSavedHistory = () => {
     try {
         const saved = localStorage.getItem(HISTORY_STORAGE_KEY);
@@ -1021,6 +1041,8 @@ const getSavedHistory = () => {
     }
 };
 
+// Keeps the slider's center mark inside the track while we render long edge labels
+// below the control, which prevents overflow on narrow layouts.
 const getSliderMarks = (question, language) => {
     const marks = question.marks?.[language] || {};
     const midPoint = Math.round((question.min + question.max) / 2);
@@ -1041,6 +1063,7 @@ const getSliderMarks = (question, language) => {
     };
 };
 
+// Converts raw form values into human-readable text for prompt generation.
 const formatAnswer = (question, values, language) => {
     const rawValue = values[question.name];
 
@@ -1062,6 +1085,7 @@ const formatAnswer = (question, values, language) => {
     return rawValue || '';
 };
 
+// Builds the final text prompt sent to the backend AI analyzer.
 const buildPrompt = (condition, values, language) => {
     const langCopy = copy[language];
     const lines = condition.questions.map((question) => {
@@ -1081,6 +1105,7 @@ const buildPrompt = (condition, values, language) => {
     ].join('\n');
 };
 
+// Offline scoring fallback so the UI still returns a useful result if the backend fails.
 const fallbackEvaluate = (conditionKey, values, language) => {
     let score = 0;
 
@@ -1158,12 +1183,69 @@ const fallbackEvaluate = (conditionKey, values, language) => {
     return { color: 'GREEN', ...fallbackText[language]['blood-pressure'].green };
 };
 
+// Normalizes backend payloads so slightly different response shapes still work.
 const getNormalizedResult = (data, fallback) => ({
     color: data?.color || fallback.color,
     reason: data?.reason || data?.condition || fallback.reason,
     advice: data?.advice || data?.recommendation || fallback.advice,
 });
 
+// Builds the REST endpoint for inserting rows into a Supabase table.
+const getSupabaseInsertEndpoint = () => {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+        return '';
+    }
+
+    return `${SUPABASE_URL}/${SUPABASE_TABLE}`;
+};
+
+// Persists the final analysis payload to Supabase using the REST API.
+// This runs after we already have a final result, whether it came from the backend
+// analyzer or from the local fallback evaluator.
+const saveResultToSupabase = async ({
+    condition,
+    values,
+    result,
+    language,
+    analysisSource,
+}) => {
+    const endpoint = getSupabaseInsertEndpoint();
+
+    if (!endpoint) {
+        return;
+    }
+
+    const payload = {
+        condition_key: condition.key,
+        language,
+        user_answers: values,
+        result_data: {
+            condition_title: condition.title[language],
+            color: result.color,
+            reason: result.reason,
+            advice: result.advice,
+            analysis_source: analysisSource,
+        },
+    };
+
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+            Prefer: 'return=minimal',
+        },
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `Supabase insert failed with HTTP ${response.status}`);
+    }
+};
+
+// Presentational result panel shown after analysis completes.
 const ResultCard = ({ result, title, language }) => {
     const langCopy = copy[language];
     const labels = scoreLabels(langCopy);
@@ -1209,6 +1291,8 @@ const ResultCard = ({ result, title, language }) => {
     );
 };
 
+// Schema-driven field renderer. This keeps the parent form loop simple and avoids
+// hardcoding separate JSX for every single question in the medical forms.
 const QuestionField = ({ question, form, language }) => {
     const langCopy = copy[language];
     const radioValue = Form.useWatch(question.name, form);
@@ -1286,6 +1370,7 @@ const QuestionField = ({ question, form, language }) => {
 
     return (
         <>
+            {/* Some radio questions allow a free-text "Other" value when needed. */}
             <Form.Item
                 label={question.label[language]}
                 name={question.name}
@@ -1316,6 +1401,8 @@ const QuestionField = ({ question, form, language }) => {
 };
 
 function FormsSympthoms() {
+    // Main screen state: active language, active condition, analysis result,
+    // loading state, saved history, history drawer visibility, and Ant Design form API.
     const [language, setLanguage] = useState(getInitialLanguage);
     const [selectedConditionKey, setSelectedConditionKey] = useState(conditions[0].key);
     const [result, setResult] = useState(null);
@@ -1325,30 +1412,36 @@ function FormsSympthoms() {
     const [form] = Form.useForm();
     const { message } = App.useApp();
 
+    // Derived values for the currently active language and form schema.
     const langCopy = copy[language];
     const selectedCondition = useMemo(
         () => conditions.find((item) => item.key === selectedConditionKey) || conditions[0],
         [selectedConditionKey]
     );
 
+    // Persist language changes immediately so refreshes keep the same locale.
     useEffect(() => {
         localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
     }, [language]);
 
+    // Persist submission history for the drawer restore feature.
     useEffect(() => {
         localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
     }, [history]);
 
+    // Resets only the currently open questionnaire and its result.
     const resetCurrentForm = () => {
         form.resetFields();
         setResult(null);
     };
 
+    // Switching condition types should clear the previous form's answers.
     const handleConditionChange = (nextKey) => {
         setSelectedConditionKey(nextKey);
         resetCurrentForm();
     };
 
+    // Save enough data to fully restore a previous request later.
     const saveHistory = (values, nextResult) => {
         const entry = {
             id: Date.now(),
@@ -1362,6 +1455,24 @@ function FormsSympthoms() {
         setHistory((previous) => [entry, ...previous].slice(0, 12));
     };
 
+    // Writes the completed result to Supabase when the env config is available.
+    // History stays local even if this network request fails.
+    const persistFinalResult = async (values, finalResult, analysisSource) => {
+        await saveResultToSupabase({
+            condition: selectedCondition,
+            values,
+            result: finalResult,
+            language,
+            analysisSource,
+        });
+    };
+
+    // Main submit pipeline:
+    // 1. Build the AI prompt from the schema and answers
+    // 2. Try the backend analyzer
+    // 3. Fall back to local heuristics if the request fails
+    // 4. Save the outcome into history either way
+    // 5. Persist the final result to Supabase if configured
     const handleSubmit = async (values) => {
         const prompt = buildPrompt(selectedCondition, values, language);
         const fallback = fallbackEvaluate(selectedCondition.key, values, language);
@@ -1386,6 +1497,11 @@ function FormsSympthoms() {
             const normalized = getNormalizedResult(data, fallback);
             setResult(normalized);
             saveHistory(values, normalized);
+            try {
+                await persistFinalResult(values, normalized, 'backend');
+            } catch (supabaseError) {
+                message.warning(`Supabase save failed: ${supabaseError.message}`);
+            }
             message.success(langCopy.analyzeSuccess);
         } catch (error) {
             const localResult = {
@@ -1395,12 +1511,18 @@ function FormsSympthoms() {
 
             setResult(localResult);
             saveHistory(values, localResult);
+            try {
+                await persistFinalResult(values, localResult, 'fallback');
+            } catch (supabaseError) {
+                message.warning(`Supabase save failed: ${supabaseError.message}`);
+            }
             message.warning(langCopy.analyzeFallback);
         } finally {
             setLoading(false);
         }
     };
 
+    // Restores language, condition, raw answers, and final result from history.
     const handleRestoreHistory = (item) => {
         setLanguage(item.language || 'uz');
         setSelectedConditionKey(item.conditionKey);
@@ -1411,6 +1533,7 @@ function FormsSympthoms() {
 
     const labels = scoreLabels(langCopy);
     const historyLabel = langCopy.historyButton || langCopy.historyTitle;
+    // Shared drawer body for recent submissions.
     const historyContent = (
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
             {history.length > 0 ? (
@@ -1468,6 +1591,7 @@ function FormsSympthoms() {
         <ConfigProvider
             theme={{
                 token: {
+                    // The selected condition changes the accent color of the experience.
                     colorPrimary: selectedCondition.accent,
                     borderRadius: 18,
                     fontFamily: '"Plus Jakarta Sans", sans-serif',
@@ -1494,6 +1618,7 @@ function FormsSympthoms() {
                             styles={{ body: { padding: 0 } }}
                         >
                             <Row gutter={0}>
+                                {/* Left column: app intro, language switch, condition selector, warning, history entry point */}
                                 <Col xs={24} xl={8}>
                                     <div
                                         style={{
@@ -1551,6 +1676,7 @@ function FormsSympthoms() {
                                                 }}
                                                 styles={{ body: { padding: 16 } }}
                                             >
+                                                {/* Language switch updates all labels, prompts, and status text. */}
                                                 <Text style={{ display: 'block', color: '#dbeafe', marginBottom: 10 }}>
                                                     {langCopy.language}
                                                 </Text>
@@ -1569,6 +1695,7 @@ function FormsSympthoms() {
                                                     {langCopy.pickerLabel}
                                                 </Text>
                                                 <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                                                    {/* Dynamic selector for the three pediatric monitoring flows. */}
                                                     {conditions.map((item) => {
                                                         const active = item.key === selectedConditionKey;
 
@@ -1636,6 +1763,7 @@ function FormsSympthoms() {
                                     </div>
                                 </Col>
 
+                                {/* Right column: active form heading, generated questionnaire, submit actions, result panel */}
                                 <Col xs={24} xl={16}>
                                     <div style={{ padding: 24 }}>
                                         <Space
@@ -1673,6 +1801,7 @@ function FormsSympthoms() {
                                             initialValues={{ mood: 5 }}
                                         >
                                             <Row gutter={[18, 0]}>
+                                                {/* Each visible field is generated from the selected condition schema. */}
                                                 {selectedCondition.questions.map((question) => (
                                                     <Col
                                                         key={question.name}
@@ -1724,6 +1853,7 @@ function FormsSympthoms() {
                                         ) : null}
 
                                         {!loading && result ? (
+                                            // A result can come from a fresh submit or from restoring history.
                                             <ResultCard result={result} title={selectedCondition.title[language]} language={language} />
                                         ) : null}
                                     </div>
@@ -1731,6 +1861,7 @@ function FormsSympthoms() {
                             </Row>
                         </Card>
 
+                        {/* History lives in a drawer so it stays available without crowding the main form. */}
                         <Drawer
                             title={langCopy.historyTitle}
                             placement="right"
