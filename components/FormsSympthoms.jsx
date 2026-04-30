@@ -1193,7 +1193,7 @@ const getNormalizedResult = (data, fallback) => ({
 // Builds the REST endpoint for inserting rows into a Supabase table.
 const getSupabaseInsertEndpoint = () => {
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-        return '';
+        throw new Error('Supabase env is missing. Vite reads .env, not .env.example.');
     }
 
     return `${SUPABASE_URL}/${SUPABASE_TABLE}`;
